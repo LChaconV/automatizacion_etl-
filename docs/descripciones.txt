@@ -1,0 +1,130 @@
+EXTRACT
+CHIRPS
+get_target_date_for_download
+
+    Calcula el año y mes del archivo CHIRPS a descargar.
+    El objetivo es siempre el mes anterior a la 'current_date' proporcionada
+    (o la fecha actual del sistema si no se especifica).
+
+    Args:
+        current_date (datetime.date, optional): La fecha de referencia para determinar el mes.
+                                                Por defecto, usa la fecha actual del sistema.
+
+    Returns:
+        tuple[int, str]: Una tupla que contiene el año (int) y el mes (str, con dos dígitos, ej. "01", "12").
+
+extract_chirps_data
+    
+    Descarga el archivo CHIRPS más reciente disponible y lo descomprime.
+    El mes objetivo para la descarga es el mes anterior a la 'current_date' proporcionada.
+
+    Args:
+        config (dict): El diccionario de configuración cargado de config.yaml.
+        current_date (datetime.date, optional): La fecha de referencia para determinar el mes a descargar.
+                                                Si es None, se usa datetime.date.today().
+
+    Returns:
+        Path or None: La ruta al archivo TIF descargado y descomprimido, o None si la descarga falla.
+    
+NOAA
+update_oni_data
+    
+    Downloads the latest ONI data from NOAA, compares it with the local raw CSV,
+    appends any new records, and then saves a processed ONI CSV for the model.
+
+TRANSFORM
+CHIRPS
+transform_chirps_data
+    
+    Recorta un archivo ráster CHIRPS a la geometría de Colombia y guarda el resultado.
+
+    Args:
+        config (dict): El diccionario de configuración cargado de config.yaml.
+        input_chirps_file_path (Path): La ruta al archivo ráster CHIRPS .tif crudo de entrada.
+
+    Returns:
+        Path or None: La ruta al archivo TIF procesado y recortado, o None si la transformación falla.
+
+NOAA
+transform_oni_data    
+    Calculates the Oceanic Niño Index (ONI) as a 3-month centered moving average
+    from raw anomaly data, and saves the result.
+
+    Args:
+        config (dict): The configuration dictionary, containing 'project_root' and
+                       parameters for 'data' and 'processing'.
+
+    Returns:
+        Optional[Path]: Path to the processed ONI index CSV file if successful,
+                        None otherwise.
+    
+
+---------------------------------------------------------------- MODEL----------------------------------------------------
+AVERAGE CALCULATOR
+_calculate_weighted_average_data
+    """Calculates the weighted average of a list of raster data arrays."""
+       # It's crucial here that the order of `raster_data_list` matches the order of `weights`.
+    # If _get_normalized_weights produces weights from most recent to oldest, and raster_data_list
+    # is collected from oldest to most recent, then `[::-1]` would be correct to align them.
+    # Assuming `raster_data_list` is collected from oldest year to most recent year,
+    # and `weights` from `_get_normalized_weights` are for (most recent -> oldest),
+    # then `raster_data_list[::-1]` aligns (most recent raster, ..., oldest raster) with (most recent weight, ..., oldest weight).
+
+compute_average_raster    
+
+    Computes a historical average raster (simple or weighted) for a given month and year.
+
+    Args:
+        config (dict): The configuration dictionary for the specific average calculation.
+                       This dict should already contain 'project_root' and relevant 'average_calculation' and 'processing' keys.
+        current_year_to_process (int): The year for which the average is being calculated (e.g., 2025).
+                                       The historical data will be from `current_year_to_process - num_years_for_average` to `current_year_to_process - 1`.
+        current_month_to_process (str): The month (MM format, e.g., "06") for which the average is calculated.
+
+    Returns:
+        Path or None: The path to the saved average raster file, or None if calculation fails.
+
+prepare_data_source_config
+    
+    Prepares a specific configuration dictionary for a data source,
+    merging the base configuration with the data source's specific configuration.
+    This function creates a *copy* of the base_config and adds/overwrites keys
+    relevant for the specific average calculation step.
+
+    Args:
+        base_config (dict): The full application configuration from YAML.
+        data_source_key (str): The key for the specific data source under 'data_sources'
+                               (e.g., 'chirps_historical_average' or 'average_for_model_input').
+    Returns:
+        dict: A new configuration dictionary prepared for the specific data source.
+   
+run_average_calculations
+
+    Orchestrates the two average calculation steps based on the provided current date.
+
+    Args:
+        current_date_today (datetime): The reference date (e.g., today's date from main.py).
+        full_app_config (dict): The loaded full application configuration from YAML.
+
+    Returns:
+        tuple[Optional[Path], Optional[Path]]: A tuple containing paths to the
+        historical average raster and the model input average raster, respectively.
+        Returns (None, None) if any step fails.
+   
+
+
+
+ERROR CALCULATOR
+compute_error    """
+    Calculates the absolute error between real precipitation data and average precipitation data
+    for a specific year and month.
+
+    Args:
+        config (dict): The configuration dictionary, containing 'project_root' and
+                       parameters for 'absolute_error_calculation' and 'processing'.
+        target_year (int): The year for which to calculate the error.
+        target_month (str): The month (e.g., "01" for January) for which to calculate the error.
+
+    Returns:
+        Path or None: Path to the saved absolute error raster, or None if calculation fails.
+    """

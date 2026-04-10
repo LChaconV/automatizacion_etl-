@@ -1,0 +1,4 @@
+last_processed_dates:
+  chirps: '2025-12-01'
+  noaa_oni_historical: '2025-12-01'
+  noaa_oni_prediction: '2025-12-01'

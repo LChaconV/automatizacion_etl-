@@ -1,0 +1,143 @@
+
+project:
+  name: "ETL_datos_meteorologicos"
+  description: "Pipeline para la extracción, procesamiento y carga de datos meteorologicos para Colombia."
+
+# --- Configuración de Rutas Base ---
+
+data:
+  base_dir: "data"             # Directorio principal para todos los datos
+  raw_base_dir: "data/raw"     # Subdirectorio para datos crudos (descargados)
+  processed_base_dir: "data/processed" # Subdirectorio para datos limpios y procesados
+  status_dir: "data/processed/status/last_processed_dates.yaml" # Ruta al archivo de estado de últimas fechas procesadas
+  
+  reference:
+    divipola_csv: "raw/divipola/municipios.csv"
+    municipalities_geojson: "processed/maps/municipality_polygons_WGS84.geojson"
+    dim_municipality_geoparquet: "processed/reference/dim_municipality.parquet"
+
+# --- Configuración para la Extracción de Datos (src/etl/extract/extract_chirps.py) ---
+extraction_params:
+  chirps_source:
+    base_url: "https://data.chc.ucsb.edu/products/CHIRPS-2.0/global_monthly/tifs/"
+    filename_prefix: "chirps-v2.0."
+    filename_suffix: ".tif.gz"
+    download_sub_dir: "chirps_raster_raw" 
+
+
+  colombia_geojson: "data/processed/maps/colombia_polygon/colombia_WGS84.geojson" 
+
+  chirps_download_retries:
+    max_attempts: 5
+    delay_hours: 0
+    # Configuración para la extracción de datos ONI
+  oni_extraction:
+    remote_url: "https://www.cpc.ncep.noaa.gov/data/indices/oni.ascii.txt"
+    
+    raw_sub_dir: "noaa_oni_raw" 
+  
+ 
+    oni_data_raw_path: "data/processed/noaa/oni_index.csv" 
+
+  oni_prediction_extraction:
+    description: "Extracción de la predicción de ONI desde el sitio IRI ENSO."
+    # URL base para las predicciones de IRI ENSO
+    base_url: "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/"
+    # Subdirectorio donde se guardarán los archivos HTML descargados
+    oni_prediction_filename: "noaa/oni_index_prediction.csv"
+
+
+# --- Configuración para el Procesamiento de Datos (src/etl/transform/transform_chirps.py) ---
+processing:
+
+  # Directorio de entrada para los rásteres CHIRPS raw (relativo a data.raw_base_dir)
+  input_raw_chirps_sub_dir: "chirps_raster_raw" 
+  # Directorio de salida para los rásteres CHIRPS recortados (relativa a data.processed_base_dir)
+  output_processed_chirps_sub_dir: "chirps/precip_raster_colombia"
+  outputs:
+    chirps_municipal_parquet_dir: "data/processed/chirps_municipal"
+
+  # Parámetros de transformación general de rásteres (válidos para todos los rásteres de salida)
+  raster_transform:
+    input_nodata_value: -9999        # Valor nodata esperado en los rásteres de entrada (ej. CHIRPS original)
+    output_nodata_value: -9999.0     # Valor nodata a usar en TODOS los rásteres de salida procesados y de resultados
+    output_dtype: "float32"          # Tipo de dato para TODOS los rásteres de salida
+  
+   #  Configuración para el procesamiento de datos ONI ---
+  oni_processing:
+    description: "Parámetros para la transformación de datos ONI raw a un índice de 3 meses."
+    input_raw_oni_sub_dir: "noaa_oni_raw"
+    input_raw_oni_filename: "oni_index_raw.csv"
+    output_processed_oni_sub_dir: "noaa"
+    output_processed_oni_filename: "oni_index.csv"
+  
+  outputs:
+    noaa_parquet_partitioned_dir: "data/processed/noaa_historical"
+    noaa_prediction_parquet_dir: "data/processed/noaa_prediction"
+    chirps_municipal_parquet_dir: "data/processed/chirps_municipal"
+
+
+
+
+#------------ modelo
+
+# --- Configuración de Operaciones con Fuentes de Datos Específicas (para src/model/average_calculator.py y src/model/error_calculator.py) ---
+# Cada entrada aquí se corresponde con una "tarea" o "fuente de datos".
+data_sources:
+
+
+
+
+  # 1. Configuración para el cálculo del promedio histórico de CHIRPS
+data_sources:
+  chirps_historical_average:
+    description: "Promedio histórico mensual municipal (Parquet ETL) como línea base."
+    output_base_dir_key: "results"
+    output_results_sub_dir: "average_precipitation"
+    average_params:
+      num_years_for_average: 10
+      average_type: "weighted"
+      weight_generation_type: "linear_decreasing"
+      custom_weights: null
+      output_filename_base: "chirps_historical_avg_muni"
+
+  average_for_model_input:
+    description: "Promedio municipal para entrada del modelo."
+    output_base_dir_key: "results"
+    output_results_sub_dir: "average_precipitation_model"
+    average_params:
+      num_years_for_average: 10
+      average_type: "weighted"
+      weight_generation_type: "linear_decreasing"
+      custom_weights: null
+      output_filename_base: "model_input_avg_muni"
+
+  # 3. Configuración para el cálculo del error (para src/model/error_calculator.py)
+  error_calculation:
+    avg_input_data_sub_dir: "average_precipitation"   # donde guardas chirps_historical_avg_YYYY_MM.parquet
+    error_params:
+      avg_filename_base: "chirps_historical_avg"      # o el nombre base real que estés usando en average_calculator
+      error_output_filename_base: "error"
+# --- Configuración para el Modelo de Regresión (futuro: src/model/regression_model.py) ---
+model_params:
+ 
+  oni_data_path: "data/processed/noaa/oni_index.csv" 
+  oni_index_prediction_path: "data/processed/noaa/oni_index_prediction.csv"
+
+  
+  # Nombres de archivos para los resultados de la regresión
+  regression_output_filenames: #Salidas rasterizadas de la regresión
+    coef: "coef_oni"         
+    intercept: "intercept"   
+    r2: "r2"                 
+
+  # Nombres de archivos para los resultados de la predicción de intervalos (NUEVO)
+  prediction_output_filenames:
+    error_predicted: "predicted_error"
+    precipitation_min: "precipitation_min"
+    precipitation_max: "precipitation_max"
+
+
+scheduler:
+  day_of_month: 11
+  execution_time: "07:17" # Formato HH:MM

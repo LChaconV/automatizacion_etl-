@@ -1,0 +1,13 @@
+[
+  {
+    "target_year":2025,
+    "target_month":12,
+    "n_years_baseline":10,
+    "train_years_back":10,
+    "oni_used":-0.629,
+    "oni_source":"predicho(issue_year=2025)",
+    "n_munis_baseline":1121,
+    "n_munis_with_model":1121,
+    "out_dir":"C:\\Users\\laura\\OneDrive\\TESIS\\ETL_LauraChacon\\ETL_code\\model_outputs_demo"
+  }
+]

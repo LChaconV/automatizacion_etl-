@@ -1,0 +1,5 @@
+data/**/*.tif
+data/**/*.parquet
+data/**/*.csv
+logs/*.log
+data/processed/maps/

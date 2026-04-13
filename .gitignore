@@ -3,3 +3,6 @@ data/**/*.parquet
 data/**/*.csv
 logs/*.log
 data/processed/maps/
+data/processed/reference/dim_municipality.geojson
+*.geojson
+**/*.geojson

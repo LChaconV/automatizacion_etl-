@@ -13,7 +13,7 @@ El contenido del archivo debe ser similar a este:
 ```yaml
 chirps: '2015-01-01'
 noaa_oni_historical: '2015-01-01'
-noaa_oni_prediction: '2015-01-01'
+noaa_oni_prediction: '2020-01-01'
 ```
 
 ### 2. Archivos Geoespaciales Obligatorios

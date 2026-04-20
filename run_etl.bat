@@ -1,8 +1,8 @@
 @echo off
 setlocal
 
-set BASE_DIR=C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon
-set ETL_DIR=%BASE_DIR%\ETL_code
+set BASE_DIR=%~dp0
+set ETL_DIR=%BASE_DIR%ETL_code
 set PYTHON_EXE=%BASE_DIR%\venv\Scripts\python.exe
 
 echo BASE_DIR=%BASE_DIR%

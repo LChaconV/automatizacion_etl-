@@ -1,24 +1,3 @@
-"""
-app.py
-------
-Dashboard principal: ONI ↔ Precipitación municipal en Colombia.
-Laura Andrea Chacón Velásquez · Tesis Maestría Ciencia de Datos
-Escuela Colombiana de Ingeniería Julio Garavito · 2025
-
-Layout:
-  Sidebar   → filtros globales
-  Tab 1     → Mapas (precipitación | correlación ONI)
-  Tab 2     → Serie temporal
-  Tab 3     → Tabla de anomalías
-
-Filtros y su alcance:
-  Municipio   → todos los tabs
-  Fase ONI    → serie temporal y tabla
-  Mes         → mapa precipitación + tabla
-  Año         → mapa precipitación
-  Rango años  → ambos mapas + serie temporal + tabla
-  Variable    → qué muestra el mapa coroplético de correlación
-"""
 
 import streamlit as st
 from streamlit_folium import st_folium
@@ -243,11 +222,6 @@ df_base_fases = df_base_rango[df_base_rango["fase_oni"].isin(fases_sel)]
 # Filtro mes para tabla
 df_base_mes = df_base_fases[df_base_fases["mes"] == mes_num]
 
-# Cálculos analíticos
-# IMPORTANTE: detectar_anomalias() corre primero porque calcular_correlacion_lags()
-# necesita la anomalía deseasonalizada (anomalia_mm = precip_mm - p50 del mes),
-# no precip_mm crudo — correlacionar el valor crudo mezclaría el ciclo estacional
-# con la señal interanual de ENOS.
 df_anomalias = detectar_anomalias(df_base_rango, df_clima_ref)
 df_lags      = calcular_correlacion_lags(df_anomalias)
 df_anomalias_fases = detectar_anomalias(df_base_fases, df_clima_ref) if not df_base_fases.empty else df_anomalias
@@ -255,9 +229,7 @@ df_anomalias_mes   = detectar_anomalias(df_base_mes,   df_clima_ref) if not df_b
 kpis      = calcular_kpis(df_base_rango, df_lags, df_anomalias, df_oni)
 mejor_lag = lag_optimo(df_lags)
 
-# Correlaciones para el mapa — rango de años, todos los meses
-# (calcular sobre anomalía deseasonalizada + p-valor corregido por
-# autocorrelación + significancia ajustada por FDR para las ~1.100 pruebas)
+
 df_combinado_rango = df_combinado[
     (df_combinado["anio"] >= anio_inicio) & (df_combinado["anio"] <= anio_fin)
 ]
@@ -426,7 +398,7 @@ with tab_mapas:
 
     # Estadísticas rápidas debajo de los mapas
     st.divider()
-    s1, s2, s3, s4, s5 = st.columns(5)
+    s1, s2, s3, s4, s5, s6 = st.columns(6)
     s1.metric("Municipios mapeados",  f"{df_corr_lag['muni_code'].nunique():,}")
     s2.metric("Corr. máxima (|r|)",   f"{df_corr_lag['correlacion'].abs().max():.3f}")
     s3.metric("Corr. mínima (|r|)",   f"{df_corr_lag['correlacion'].abs().min():.3f}")
@@ -437,6 +409,16 @@ with tab_mapas:
         f"{pct_significativo:.0f}%",
         help="% de municipios con relación ONI-precipitación significativa "
              "tras corregir por comparaciones múltiples (Benjamini-Hochberg).",
+    )
+    pct_concuerda = df_corr_lag["concuerda_spearman"].mean() * 100
+    s6.metric(
+        "Concuerda con Spearman",
+        f"{pct_concuerda:.0f}%",
+        help="% de municipios donde Pearson y Spearman coinciden en signo y "
+             "significancia (FDR). Spearman no asume normalidad ni relación "
+             "lineal — es un chequeo de robustez frente a la asimetría de la "
+             "precipitación. Un % bajo indicaría que la conclusión depende "
+             "del método elegido, no solo de los datos.",
     )
 
 # ════════════════════════════════════════════
@@ -562,11 +544,18 @@ with tab_prospectivo:
         df_riesgo = proyectar_riesgo_prospectivo(df_oni_pred, mejor_lag, fecha_referencia)
 
         if df_riesgo.empty:
-            st.info(
-                f"El pronóstico disponible no tiene períodos posteriores al "
-                f"último ONI observado ({fecha_referencia.strftime('%b %Y')})."
-            )
+            st.info("No hay datos de pronóstico ONI disponibles para proyectar.")
         else:
+            if df_riesgo["pronostico_vencido"].iloc[0]:
+                st.error(
+                    f"⚠️ **Pronóstico vencido**: el último pronóstico ONI disponible "
+                    f"no cubre ningún período posterior al último ONI observado "
+                    f"({fecha_referencia.strftime('%b %Y')}). Se muestra de todas formas "
+                    "la última vigencia cargada, pero **no representa el riesgo actual** — "
+                    "hay que volver a correr el ETL de pronóstico "
+                    "(`extract_noaa_prediction.py`) para refrescarlo."
+                )
+
             st.plotly_chart(
                 riesgo_prospectivo(df_riesgo, titulo=titulo_vista),
                 use_container_width=True,

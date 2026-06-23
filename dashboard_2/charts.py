@@ -1,26 +1,4 @@
-"""
-charts.py
----------
-Todas las figuras del dashboard ONI ↔ Precipitación Colombia.
 
-Gráficos (Plotly):
-  1. serie_temporal()        — precipitación mensual + ONI + anomalías
-  2. dispersion_oni()        — scatter precipitación vs. ONI por fase
-  3. lags_barras()           — correlación cruzada por lag (barras horizontales)
-  4. climatologia_fases()    — ciclo anual por fase ONI (líneas)
-  5. anomalias_tabla()       — tabla de eventos extremos
-
-Mapa (Folium):
-  6. mapa_correlacion()      — coropleta de correlación ONI por municipio
-
-Convención de colores:
-  El Niño  → #D85A30  (naranja-rojo)
-  La Niña  → #378ADD  (azul)
-  Neutral  → #888780  (gris)
-  Déficit  → #D85A30
-  Exceso   → #378ADD
-  Normal   → rgba gris suave
-"""
 
 import folium
 import numpy as np
@@ -54,16 +32,7 @@ NOMBRES_MESES = ["Ene","Feb","Mar","Abr","May","Jun",
 # ─────────────────────────────────────────────
 
 def serie_temporal(df_anomalias: pd.DataFrame, titulo: str = "") -> go.Figure:
-    """
-    Barras de precipitación mensual coloreadas por tipo de anomalía,
-    con línea ONI en eje secundario.
 
-    Parámetros
-    ----------
-    df_anomalias : salida de analytics.detectar_anomalias()
-                   debe tener: date, precip_mm, oni, fase_oni, anomalia
-    titulo       : nombre del municipio o 'Nacional'
-    """
     df = df_anomalias.sort_values("date").copy()
 
     fig = make_subplots(specs=[[{"secondary_y": True}]])
@@ -429,12 +398,7 @@ DIVIPOLA_PATH = (
 
 @st.cache_data(show_spinner="Cargando geometrías de municipios...")
 def _cargar_geodataframe():
-    """
-    Lee el parquet DIVIPOLA con geometrías municipales.
-    Columnas esperadas: geometry, id_mun, name_mun, id_dept.
-    id_mun se normaliza a str de 5 dígitos para coincidir con muni_code.
-    Requiere geopandas (pip install geopandas).
-    """
+
     import geopandas as gpd
 
     gdf = gpd.read_parquet(DIVIPOLA_PATH)
@@ -453,26 +417,7 @@ def mapa_correlacion(
     df_corr: pd.DataFrame,
     muni_seleccionado: str | None = None,
 ) -> folium.Map:
-    """
-    Mapa coroplético de Colombia coloreado por correlación ONI ↔ anomalía de
-    precipitación en el lag óptimo de cada municipio.
 
-    Los municipios sin significancia estadística tras la corrección por
-    comparaciones múltiples (FDR, columna 'significativo_fdr') se muestran
-    atenuados (opacidad reducida) en vez de ocultos por completo, para no
-    perder la magnitud/signo estimado pero comunicar que es menos confiable.
-
-    Parámetros
-    ----------
-    df_corr           : salida de analytics.correlacion_todos_municipios()
-                        columnas: muni_code, correlacion, lag, p_valor,
-                        p_valor_fdr, significativo_fdr
-    muni_seleccionado : muni_code del municipio activo (se resalta con borde)
-
-    Retorna
-    -------
-    folium.Map listo para st_folium()
-    """
     import geopandas as gpd
 
     gdf = _cargar_geodataframe()
@@ -484,6 +429,8 @@ def mapa_correlacion(
         df_corr["significativo_fdr"] = True  # compatibilidad si no viene calculado
     if "p_valor_fdr" not in df_corr.columns:
         df_corr["p_valor_fdr"] = df_corr.get("p_valor")
+    if "concuerda_spearman" not in df_corr.columns:
+        df_corr["concuerda_spearman"] = None  # compatibilidad si no viene calculado
     gdf = gdf.merge(df_corr, left_on="id_mun", right_on="muni_code", how="left")
 
     geojson_str = gdf.to_json()
@@ -531,9 +478,11 @@ def mapa_correlacion(
                      else "transparent",
         },
         tooltip=folium.GeoJsonTooltip(
-            fields=["id_mun", "name_mun", "correlacion", "lag", "p_valor_fdr", "significativo_fdr"],
-            aliases=["Código:", "Municipio:", "Correlación:", "Lag (meses):",
-                     "p-valor (FDR):", "Significativo (FDR):"],
+            fields=["id_mun", "name_mun", "correlacion", "lag", "p_valor_fdr",
+                    "significativo_fdr", "spearman", "concuerda_spearman"],
+            aliases=["Código:", "Municipio:", "Correlación (Pearson):", "Lag (meses):",
+                     "p-valor (FDR):", "Significativo (FDR):", "Correlación (Spearman):",
+                     "¿Concuerda Pearson/Spearman?:"],
             localize=True,
         ),
     ).add_to(mapa)
@@ -570,21 +519,7 @@ def mapa_precipitacion(
     anio: int,
     muni_seleccionado: str | None = None,
 ) -> folium.Map:
-    """
-    Mapa coroplético de Colombia coloreado por precipitación mensual absoluta
-    para un mes y año específicos.
 
-    Parámetros
-    ----------
-    df_combinado      : DataFrame combinado con columnas muni_code, mes, anio, precip_mm
-    mes               : mes a visualizar (1-12)
-    anio              : año a visualizar
-    muni_seleccionado : muni_code del municipio activo (se resalta con borde)
-
-    Retorna
-    -------
-    folium.Map listo para st_folium()
-    """
     import geopandas as gpd
 
     gdf = _cargar_geodataframe()
@@ -778,8 +713,8 @@ def serie_temporal_anomalia(df_anomalias: pd.DataFrame, titulo: str = "") -> go.
 # 9. RIESGO PROSPECTIVO (ONI PREDICHO)
 # ─────────────────────────────────────────────
 
-CONFIANZA_OPACIDAD = {"Alta": 1.0, "Media": 0.55, "Baja": 0.28}
-CONFIANZA_SIMBOLO  = {"Alta": "circle", "Media": "diamond", "Baja": "x"}
+CONFIANZA_OPACIDAD = {"Alta": 1.0, "Media": 0.55, "Baja": 0.28, "Vencido": 0.35}
+CONFIANZA_SIMBOLO  = {"Alta": "circle", "Media": "diamond", "Baja": "x", "Vencido": "triangle-down"}
 
 
 def riesgo_prospectivo(df_riesgo: pd.DataFrame, titulo: str = "") -> go.Figure:
@@ -818,7 +753,7 @@ def riesgo_prospectivo(df_riesgo: pd.DataFrame, titulo: str = "") -> go.Figure:
         ),
     )
 
-    for nivel in ["Alta", "Media", "Baja"]:
+    for nivel in ["Alta", "Media", "Baja", "Vencido"]:
         sub = df[df["confianza_pronostico"] == nivel]
         if sub.empty:
             continue
@@ -875,8 +810,15 @@ def riesgo_prospectivo(df_riesgo: pd.DataFrame, titulo: str = "") -> go.Figure:
     else:
         nota_sig = "Sin lag óptimo disponible para este municipio: no se proyecta anomalía esperada."
 
+    es_vencido = bool(df["pronostico_vencido"].iloc[0])
+    titulo_fig = (
+        f"Riesgo prospectivo ONI ↔ precipitación — {titulo} "
+        + ("⚠ PRONÓSTICO VENCIDO" if es_vencido else "")
+    )
+
     fig.update_layout(
-        title=dict(text=f"Riesgo prospectivo ONI ↔ precipitación — {titulo}", font_size=13),
+        title=dict(text=titulo_fig,
+                    font=dict(size=13, color="#B33A3A" if es_vencido else "#1f1f1f")),
         legend=dict(orientation="h", y=-0.20, font_size=10),
         margin=dict(t=60, b=90, l=60, r=30),
         plot_bgcolor="white",

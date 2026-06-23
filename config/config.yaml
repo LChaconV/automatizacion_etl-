@@ -41,8 +41,14 @@ extraction_params:
 
   oni_prediction_extraction:
     description: "Extracción de la predicción de ONI desde el sitio IRI ENSO."
-    # URL base para las predicciones de IRI ENSO
+    # URL base para las predicciones de IRI ENSO (página HTML, intento primario)
     base_url: "https://iri.columbia.edu/our-expertise/climate/forecasts/enso/"
+    # Fallback: API JSON que alimenta el gráfico de pronóstico (Highcharts)
+    # de esa misma página. Se usa solo si la tabla HTML ("modelsTable") no
+    # se encuentra (ej. porque IRI rediseñó la página y ahora el pronóstico
+    # se renderiza como gráfico interactivo en vez de tabla de texto).
+    # GET {json_fallback_base_url}{año}/{mes-1, 0-indexado}
+    json_fallback_base_url: "https://ensoforecast.iri.columbia.edu/plumes_json/"
     # Subdirectorio donde se guardarán los archivos HTML descargados
     oni_prediction_filename: "noaa/oni_index_prediction.csv"
 

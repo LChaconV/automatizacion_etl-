@@ -454,13 +454,19 @@ def mapa_correlacion(
     muni_seleccionado: str | None = None,
 ) -> folium.Map:
     """
-    Mapa coroplético de Colombia coloreado por correlación ONI ↔ precipitación
-    en el lag óptimo de cada municipio.
+    Mapa coroplético de Colombia coloreado por correlación ONI ↔ anomalía de
+    precipitación en el lag óptimo de cada municipio.
+
+    Los municipios sin significancia estadística tras la corrección por
+    comparaciones múltiples (FDR, columna 'significativo_fdr') se muestran
+    atenuados (opacidad reducida) en vez de ocultos por completo, para no
+    perder la magnitud/signo estimado pero comunicar que es menos confiable.
 
     Parámetros
     ----------
     df_corr           : salida de analytics.correlacion_todos_municipios()
-                        columnas: muni_code, correlacion, lag, p_valor
+                        columnas: muni_code, correlacion, lag, p_valor,
+                        p_valor_fdr, significativo_fdr
     muni_seleccionado : muni_code del municipio activo (se resalta con borde)
 
     Retorna
@@ -474,6 +480,10 @@ def mapa_correlacion(
     # Unir correlaciones a las geometrías por id_mun
     df_corr = df_corr.copy()
     df_corr["muni_code"] = df_corr["muni_code"].astype(str).str.zfill(5)
+    if "significativo_fdr" not in df_corr.columns:
+        df_corr["significativo_fdr"] = True  # compatibilidad si no viene calculado
+    if "p_valor_fdr" not in df_corr.columns:
+        df_corr["p_valor_fdr"] = df_corr.get("p_valor")
     gdf = gdf.merge(df_corr, left_on="id_mun", right_on="muni_code", how="left")
 
     geojson_str = gdf.to_json()
@@ -494,9 +504,20 @@ def mapa_correlacion(
         line_opacity=0.15,
         line_weight=0.3,
         nan_fill_color="rgba(200,200,200,0.3)",
-        legend_name="Correlación ONI ↔ precipitación (lag óptimo)",
-        
+        legend_name="Correlación ONI ↔ anomalía de precipitación (lag óptimo)",
         bins=[-1, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 1],
+    ).add_to(mapa)
+
+    # Capa semitransparente que atenúa los municipios NO significativos
+    # (FDR) por encima del coroplético, simulando opacidad reducida.
+    folium.GeoJson(
+        geojson_str,
+        style_function=lambda feature: {
+            "fillOpacity": 0 if feature["properties"].get("significativo_fdr") else 0.55,
+            "fillColor": "#FFFFFF",
+            "weight": 0,
+            "color": "transparent",
+        },
     ).add_to(mapa)
 
     # Capa de tooltip + resaltado del municipio seleccionado
@@ -510,8 +531,9 @@ def mapa_correlacion(
                      else "transparent",
         },
         tooltip=folium.GeoJsonTooltip(
-            fields=["id_mun", "name_mun", "correlacion", "lag"],
-            aliases=["Código:", "Municipio:", "Correlación:", "Lag (meses):"],
+            fields=["id_mun", "name_mun", "correlacion", "lag", "p_valor_fdr", "significativo_fdr"],
+            aliases=["Código:", "Municipio:", "Correlación:", "Lag (meses):",
+                     "p-valor (FDR):", "Significativo (FDR):"],
             localize=True,
         ),
     ).add_to(mapa)
@@ -747,6 +769,127 @@ def serie_temporal_anomalia(df_anomalias: pd.DataFrame, titulo: str = "") -> go.
         range=[-3.5, 3.5],
         showgrid=False,
     )
+    fig.update_xaxes(showgrid=False)
+
+    return fig
+
+
+# ─────────────────────────────────────────────
+# 9. RIESGO PROSPECTIVO (ONI PREDICHO)
+# ─────────────────────────────────────────────
+
+CONFIANZA_OPACIDAD = {"Alta": 1.0, "Media": 0.55, "Baja": 0.28}
+CONFIANZA_SIMBOLO  = {"Alta": "circle", "Media": "diamond", "Baja": "x"}
+
+
+def riesgo_prospectivo(df_riesgo: pd.DataFrame, titulo: str = "") -> go.Figure:
+    """
+    Panel de riesgo prospectivo: ONI pronosticado (promedio del ensamble
+    CPC/IRI) con su nivel de confianza por horizonte de pronóstico, y la
+    anomalía de precipitación esperada para el municipio activo, proyectada
+    aplicando hacia adelante la sensibilidad histórica ya validada
+    (lag óptimo deseasonalizado, con p-valor corregido).
+
+    La confianza por horizonte es una categorización cualitativa basada en
+    la habilidad de pronóstico de ENOS reportada en verificaciones CPC/IRI
+    (alta 1-3 meses, moderada 4-6, baja >6 meses), no una incertidumbre
+    calculada del spread real del ensamble de modelos (no disponible en
+    este insumo). El horizonte mismo es una aproximación, ya que el ETL no
+    conserva la fecha de emisión real de cada pronóstico — ver
+    analytics.proyectar_riesgo_prospectivo().
+
+    Parámetros
+    ----------
+    df_riesgo : salida de analytics.proyectar_riesgo_prospectivo()
+    titulo    : nombre del municipio o 'Nacional'
+    """
+    if df_riesgo.empty:
+        return go.Figure()
+
+    df = df_riesgo.copy()
+
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.42, 0.58],
+        vertical_spacing=0.10,
+        subplot_titles=(
+            "ONI pronosticado (promedio del ensamble CPC/IRI)",
+            "Anomalía de precipitación esperada (proyectada desde el lag histórico)",
+        ),
+    )
+
+    for nivel in ["Alta", "Media", "Baja"]:
+        sub = df[df["confianza_pronostico"] == nivel]
+        if sub.empty:
+            continue
+        fig.add_trace(
+            go.Scatter(
+                x=sub["date"], y=sub["oni_predicho"],
+                mode="markers",
+                name=f"Confianza {nivel}",
+                marker=dict(size=11, symbol=CONFIANZA_SIMBOLO[nivel],
+                            opacity=CONFIANZA_OPACIDAD[nivel], color="#D85A30",
+                            line=dict(width=1, color="#333333")),
+                hovertemplate=(
+                    "<b>%{x|%b %Y}</b><br>ONI predicho: %{y:.2f}<br>"
+                    f"Confianza: {nivel}<extra></extra>"
+                ),
+            ),
+            row=1, col=1,
+        )
+
+    fig.add_trace(
+        go.Scatter(
+            x=df["date"], y=df["oni_predicho"],
+            mode="lines", line=dict(color="#333333", width=1, dash="dot"),
+            showlegend=False, hoverinfo="skip",
+        ),
+        row=1, col=1,
+    )
+    fig.add_hrect(y0=-0.5, y1=0.5, fillcolor="rgba(136,135,128,0.10)",
+                  line_width=0, row=1, col=1)
+    fig.add_hline(y=0, line_dash="dot", line_color="rgba(100,100,100,0.4)", row=1, col=1)
+
+    if df["anomalia_esperada_mm"].notna().any():
+        colores = ["#185FA5" if v >= 0 else "#E24B4A" for v in df["anomalia_esperada_mm"]]
+        opacidades = [CONFIANZA_OPACIDAD[c] for c in df["confianza_pronostico"]]
+        fig.add_trace(
+            go.Bar(
+                x=df["mes_impacto_esperado"], y=df["anomalia_esperada_mm"],
+                name="Anomalía esperada (mm)",
+                marker=dict(color=colores, opacity=opacidades),
+                hovertemplate=(
+                    "<b>Impacto esperado: %{x|%b %Y}</b><br>"
+                    "Anomalía proyectada: %{y:.1f} mm<extra></extra>"
+                ),
+            ),
+            row=2, col=1,
+        )
+        es_significativo = bool(df["relacion_significativa"].iloc[0])
+        nota_sig = (
+            "Relación histórica del municipio significativa tras corrección FDR."
+            if es_significativo else
+            "⚠ Relación histórica del municipio NO significativa tras corrección FDR "
+            "— proyección de baja confiabilidad."
+        )
+    else:
+        nota_sig = "Sin lag óptimo disponible para este municipio: no se proyecta anomalía esperada."
+
+    fig.update_layout(
+        title=dict(text=f"Riesgo prospectivo ONI ↔ precipitación — {titulo}", font_size=13),
+        legend=dict(orientation="h", y=-0.20, font_size=10),
+        margin=dict(t=60, b=90, l=60, r=30),
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        hovermode="x unified",
+    )
+    fig.add_annotation(
+        text=nota_sig, xref="paper", yref="paper", x=0, y=-0.26,
+        showarrow=False, font=dict(size=10, color="gray"),
+    )
+    fig.update_yaxes(title_text="ONI", range=[-3, 3], row=1, col=1)
+    fig.update_yaxes(title_text="Anomalía (mm)", zeroline=True,
+                      zerolinecolor="rgba(150,150,150,0.4)", row=2, col=1)
     fig.update_xaxes(showgrid=False)
 
     return fig

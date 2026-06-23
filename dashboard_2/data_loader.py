@@ -15,9 +15,10 @@ import streamlit as st
 # RUTAS  (ajusta si cambian)
 # ─────────────────────────────────────────────
 
-CHIRPS_DIR = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\data\processed\chirps_municipal"
-ONI_DIR    = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\data\processed\noaa_historical"
-CLIMA_REF  = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\dashboard_2\referencia\climatologia_referencia_1991_2020.parquet"
+CHIRPS_DIR    = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\data\processed\chirps_municipal"
+ONI_DIR       = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\data\processed\noaa_historical"
+ONI_PRED_DIR  = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\data\processed\noaa_prediction"
+CLIMA_REF     = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\dashboard_2\referencia\climatologia_referencia_1991_2020.parquet"
 
 
 # ─────────────────────────────────────────────
@@ -112,6 +113,43 @@ def _clasificar_fase(valor: float) -> str:
         return "La Niña"
     else:
         return "Neutral"
+
+
+# ─────────────────────────────────────────────
+# CARGA DE ONI PREDICHO (pronóstico CPC/IRI)
+# ─────────────────────────────────────────────
+
+@st.cache_data(show_spinner="Cargando pronóstico ONI...")
+def cargar_oni_prediccion() -> pd.DataFrame:
+    """
+    Lee los parquet de pronóstico ONI (promedio del ensamble de modelos
+    CPC/IRI, "Average, All models") generados por extract_noaa_prediction.py.
+
+    IMPORTANTE — limitación conocida de este insumo: el ETL actual no
+    conserva la fecha en que se emitió cada pronóstico (solo el período
+    objetivo y el valor), por lo que no es posible saber con certeza el
+    horizonte real (lead time) de cada predicción. Como aproximación, se
+    asume que el pronóstico vigente fue emitido poco después del último
+    mes con ONI observado disponible, y el lead time se estima como la
+    distancia en meses entre esa fecha y el mes objetivo del pronóstico.
+    Esto debe tratarse como una estimación, no como un dato exacto.
+
+    Columnas resultantes:
+        date              datetime64  primer día del mes objetivo del pronóstico
+        prediction_period str        trimestre móvil (ej. 'JAS', 'OND')
+        oni_predicho      float       valor ONI pronosticado (promedio del ensamble)
+    """
+    archivos = glob.glob(os.path.join(ONI_PRED_DIR, "year=*", "*.parquet"))
+    if not archivos:
+        raise FileNotFoundError(f"No se encontraron archivos parquet en {ONI_PRED_DIR}")
+
+    df = pd.concat([pd.read_parquet(f) for f in archivos], ignore_index=True)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.rename(columns={"prediction_oni": "oni_predicho"})
+    df = df.drop_duplicates(subset=["date"], keep="last")
+    df = df.sort_values("date").reset_index(drop=True)
+
+    return df
 
 
 # ─────────────────────────────────────────────
@@ -246,6 +284,12 @@ def cargar_climatologia_referencia() -> pd.DataFrame:
 
     Columnas: muni_code, mes, p5, p50, p95, media, std, n_anios,
               periodo_ref_inicio, periodo_ref_fin
+
+    'p50' es la MEDIANA mensual del período de referencia (no la media).
+    El dashboard la usa como umbral central para detectar anomalías y
+    deseasonalizar — se llama "mediana (P50) de referencia", no "normal
+    OMM", porque ese término designa técnicamente la media (columna
+    'media' en este mismo archivo, disponible pero no usada actualmente).
 
     Este archivo define los umbrales P5/P95 fijos para detección de
     anomalías, independientemente del filtro de período del dashboard.

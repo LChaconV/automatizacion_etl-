@@ -1,11 +1,18 @@
 """
 construir_climatologia_referencia.py
 --------------------------------------
-Construye el archivo de climatología de referencia climática OMM 1991–2020.
+Construye el archivo de climatología de referencia climática OMM 1991–2020
+(ANIO_INICIO=1991 abajo; el nombre del archivo de salida quedó como
+"..._1991_2020.parquet" de una versión anterior y no se renombró para no
+romper la ruta ya referenciada en data_loader.py — el período real cubierto
+es 1991–2020).
 
 Para cada combinación municipio × mes del año calcula:
-    p5, p50, p95   percentiles de precipitación mensual
-    media, std     estadísticos complementarios
+    p5, p50, p95   percentiles de precipitación mensual (p50 = MEDIANA,
+                   no la media — ver nota en data_loader.cargar_climatologia_referencia())
+    media, std     estadísticos complementarios (media = "normal" en
+                   sentido estricto de la OMM, disponible pero no usada
+                   actualmente por el dashboard)
     n_anios        cantidad de años con dato (máximo 30)
 
 Salida:
@@ -14,7 +21,8 @@ Salida:
 Este archivo se usa en el dashboard para detectar anomalías con umbrales
 fijos e independientes del filtro de período que el usuario seleccione.
 
-Referencia: OMM No. 1203 — Normales Climatológicas 1991–2020.
+Referencia: OMM No. 1203 — Normales Climatológicas (metodología; el
+período efectivo aquí es 1991–2020, no 1991–2020).
 """
 
 import glob
@@ -29,7 +37,7 @@ import pandas as pd
 DATA_DIR = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\data\processed\chirps_municipal"
 OUTPUT_DIR = r"C:\Users\laura\OneDrive\TESIS\ETL_LauraChacon\ETL_code\dashboard_2\referencia"
 
-ANIO_INICIO = 1990
+ANIO_INICIO = 1991
 ANIO_FIN    = 2020
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)

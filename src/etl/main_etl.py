@@ -537,5 +537,5 @@ def run_etl_pipeline(
     
 if __name__ == "__main__":
     logger.info("--- Script execution started from main block ---")
-    start_data=datetime.date(1990, 1, 1)
+    start_data=datetime.date(1991, 1, 1)
     run_etl_pipeline(start_data, None, None, None)

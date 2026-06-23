@@ -29,11 +29,13 @@ from analytics import (
     correlacion_todos_municipios,
     detectar_anomalias,
     lag_optimo,
+    proyectar_riesgo_prospectivo,
 )
 from charts import (
     anomalias_tabla,
     mapa_correlacion,
     mapa_precipitacion,
+    riesgo_prospectivo,
     serie_temporal,
     serie_temporal_anomalia,
 )
@@ -42,6 +44,7 @@ from data_loader import (
     cargar_catalogo_municipios,
     cargar_climatologia_referencia,
     cargar_oni,
+    cargar_oni_prediccion,
     cargar_precipitacion,
     combinar_datos,
     nombre_a_codigo,
@@ -106,6 +109,10 @@ df_nacional      = agregar_nacional(df_precip)
 df_nac_combinado = combinar_datos(df_nacional, df_oni)
 df_clima_ref     = cargar_climatologia_referencia()
 catalogo         = cargar_catalogo_municipios()
+try:
+    df_oni_pred = cargar_oni_prediccion()
+except FileNotFoundError:
+    df_oni_pred = None
 
 nombres_municipios = obtener_nombres_municipios(df_precip, catalogo)
 anio_min, anio_max = obtener_rango_anios(df_precip)
@@ -199,7 +206,7 @@ with st.sidebar:
         "🛰️ Precipitación: CHIRPS\n"
         "🌊 ONI: NOAA\n"
         "🗺️ Geometría: DIVIPOLA · DANE\n"
-        "📐 Anomalías: Ref. OMM 1991–2020\n"
+        "📐 Anomalías: mediana (P50) ref. OMM 1991–2020\n"
         "Pipeline ETL · Laura A. Chacón V. · 2025"
     )
 
@@ -237,19 +244,25 @@ df_base_fases = df_base_rango[df_base_rango["fase_oni"].isin(fases_sel)]
 df_base_mes = df_base_fases[df_base_fases["mes"] == mes_num]
 
 # Cálculos analíticos
-df_lags      = calcular_correlacion_lags(df_base_rango)
+# IMPORTANTE: detectar_anomalias() corre primero porque calcular_correlacion_lags()
+# necesita la anomalía deseasonalizada (anomalia_mm = precip_mm - p50 del mes),
+# no precip_mm crudo — correlacionar el valor crudo mezclaría el ciclo estacional
+# con la señal interanual de ENOS.
 df_anomalias = detectar_anomalias(df_base_rango, df_clima_ref)
+df_lags      = calcular_correlacion_lags(df_anomalias)
 df_anomalias_fases = detectar_anomalias(df_base_fases, df_clima_ref) if not df_base_fases.empty else df_anomalias
 df_anomalias_mes   = detectar_anomalias(df_base_mes,   df_clima_ref) if not df_base_mes.empty   else df_anomalias_fases
 kpis      = calcular_kpis(df_base_rango, df_lags, df_anomalias, df_oni)
 mejor_lag = lag_optimo(df_lags)
 
 # Correlaciones para el mapa — rango de años, todos los meses
+# (calcular sobre anomalía deseasonalizada + p-valor corregido por
+# autocorrelación + significancia ajustada por FDR para las ~1.100 pruebas)
 df_combinado_rango = df_combinado[
     (df_combinado["anio"] >= anio_inicio) & (df_combinado["anio"] <= anio_fin)
 ]
 with st.spinner("Calculando correlaciones..."):
-    df_corr_mapa = correlacion_todos_municipios(df_combinado_rango)
+    df_corr_mapa = correlacion_todos_municipios(df_combinado_rango, df_clima_ref)
 
 # Ajustar lag del mapa según variable seleccionada
 lag_mapa = None  # None = lag óptimo automático
@@ -296,14 +309,16 @@ with k3:
     if kpis["correlacion_optima"] is not None:
         lag_txt = f"Lag {kpis['lag_optimo_meses']} mes{'es' if kpis['lag_optimo_meses'] != 1 else ''}"
         corr_color = "#E24B4A" if kpis["correlacion_optima"] < 0 else "#185FA5"
+        sig_txt = "p &lt; 0.05*" if mejor_lag.get("significativo") else "no significativo*"
         st.markdown(
             f"<div class='kpi-card'>"
             f"<div class='kpi-label'>↔️ Correlación ONI óptima</div>"
             f"<div class='kpi-value' style='color:{corr_color}'>"
             f"{kpis['correlacion_optima']:.3f}</div>"
-            f"<div class='kpi-sub'>{lag_txt} · p &lt; 0.05</div>"
+            f"<div class='kpi-sub'>{lag_txt} · {sig_txt}</div>"
             f"</div>", unsafe_allow_html=True,
         )
+        st.caption("*sobre anomalía deseasonalizada · p-valor corregido por autocorrelación")
     else:
         st.markdown(
             "<div class='kpi-card'>"
@@ -318,7 +333,7 @@ with k4:
         f"<div class='kpi-card'>"
         f"<div class='kpi-label'>⚠️ Anomalías detectadas</div>"
         f"<div class='kpi-value'>{kpis['n_anomalias']}</div>"
-        f"<div class='kpi-sub'>Ref. OMM 1991–2020 · P5/P95</div>"
+        f"<div class='kpi-sub'>Mediana (P50) ref. OMM 1991–2020 · P5/P95</div>"
         f"</div>", unsafe_allow_html=True,
     )
 
@@ -328,10 +343,11 @@ st.divider()
 # TABS
 # ─────────────────────────────────────────────
 
-tab_mapas, tab_serie, tab_tabla = st.tabs([
+tab_mapas, tab_serie, tab_tabla, tab_prospectivo = st.tabs([
     "🗺️  Mapas",
     "📈  Serie temporal",
     "📋  Anomalías",
+    "🔮  Riesgo prospectivo",
 ])
 
 # ════════════════════════════════════════════
@@ -372,13 +388,14 @@ with tab_mapas:
         )
         st.caption(
             f"{anio_inicio}–{anio_fin} · todos los meses · "
-            f"{'lag óptimo automático' if lag_mapa is None else f'lag {lag_mapa} fijo'}"
+            f"{'lag óptimo automático' if lag_mapa is None else f'lag {lag_mapa} fijo'} · "
+            "atenuado = no significativo (FDR)"
         )
 
         # Si se seleccionó un lag fijo, recalcular con ese lag
         if lag_mapa is not None:
             df_corr_lag = correlacion_todos_municipios(
-                df_combinado_rango, max_lag=lag_mapa
+                df_combinado_rango, df_clima_ref, max_lag=lag_mapa
             )
         else:
             df_corr_lag = df_corr_mapa
@@ -409,11 +426,18 @@ with tab_mapas:
 
     # Estadísticas rápidas debajo de los mapas
     st.divider()
-    s1, s2, s3, s4 = st.columns(4)
+    s1, s2, s3, s4, s5 = st.columns(5)
     s1.metric("Municipios mapeados",  f"{df_corr_lag['muni_code'].nunique():,}")
     s2.metric("Corr. máxima (|r|)",   f"{df_corr_lag['correlacion'].abs().max():.3f}")
     s3.metric("Corr. mínima (|r|)",   f"{df_corr_lag['correlacion'].abs().min():.3f}")
     s4.metric("Corr. media (|r|)",    f"{df_corr_lag['correlacion'].abs().mean():.3f}")
+    pct_significativo = df_corr_lag["significativo_fdr"].mean() * 100
+    s5.metric(
+        "Significativos (FDR)",
+        f"{pct_significativo:.0f}%",
+        help="% de municipios con relación ONI-precipitación significativa "
+             "tras corregir por comparaciones múltiples (Benjamini-Hochberg).",
+    )
 
 # ════════════════════════════════════════════
 # TAB 2 — SERIE TEMPORAL
@@ -487,7 +511,7 @@ with tab_tabla:
     st.markdown(
         f"**Anomalías históricas · {mes_nombre} · {anio_inicio}–{anio_fin} · {titulo_vista}**"
     )
-    st.caption("Ref. OMM 1991–2020 · P5/P95 por mes del año")
+    st.caption("Mediana (P50) ref. OMM 1991–2020 · P5/P95 por mes del año")
 
     if df_anomalias_mes.empty:
         st.warning(
@@ -507,8 +531,63 @@ with tab_tabla:
 
         r1, r2, r3 = st.columns(3)
         r1.metric("Meses en déficit",  n_def,
-                  help="Precipitación < P5 de referencia OMM")
+                  help="Precipitación < P5 de referencia OMM 1991–2020")
         r2.metric("Meses en exceso",   n_exc,
-                  help="Precipitación > P95 de referencia OMM")
+                  help="Precipitación > P95 de referencia OMM 1991–2020")
         r3.metric("Meses normales",    n_nor,
                   help="Precipitación dentro del rango P5–P95")
+
+# ════════════════════════════════════════════
+# TAB 4 — RIESGO PROSPECTIVO (ONI PREDICHO)
+# ════════════════════════════════════════════
+
+with tab_prospectivo:
+
+    st.markdown(f"**Riesgo prospectivo · {titulo_vista}**")
+    st.caption(
+        "Pronóstico ONI (promedio del ensamble CPC/IRI) aplicado hacia adelante "
+        "usando la sensibilidad histórica ya validada del municipio (lag óptimo "
+        "deseasonalizado). No responde a los filtros de mes, año ni fases ONI — "
+        "solo al municipio seleccionado."
+    )
+
+    if df_oni_pred is None or df_oni_pred.empty:
+        st.warning(
+            "No se encontró el pronóstico ONI en "
+            "`data/processed/noaa_prediction/`. Ejecuta el pipeline de "
+            "extracción de pronóstico (extract_noaa_prediction.py) primero."
+        )
+    else:
+        fecha_referencia = df_oni["date"].max()
+        df_riesgo = proyectar_riesgo_prospectivo(df_oni_pred, mejor_lag, fecha_referencia)
+
+        if df_riesgo.empty:
+            st.info(
+                f"El pronóstico disponible no tiene períodos posteriores al "
+                f"último ONI observado ({fecha_referencia.strftime('%b %Y')})."
+            )
+        else:
+            st.plotly_chart(
+                riesgo_prospectivo(df_riesgo, titulo=titulo_vista),
+                use_container_width=True,
+            )
+
+            st.caption(
+                f"Último ONI observado: **{fecha_referencia.strftime('%b %Y')}** "
+                "(ancla usada para estimar el horizonte de cada pronóstico). "
+                "⚠️ El ETL de pronóstico no conserva la fecha real de emisión de "
+                "cada predicción, por lo que el horizonte (lead time) y, por tanto, "
+                "el nivel de confianza mostrado son una **aproximación**, no un dato exacto. "
+                "La confianza por horizonte es una categorización cualitativa basada en "
+                "la habilidad de pronóstico de ENOS reportada por CPC/IRI (alta 1–3 meses, "
+                "moderada 4–6, baja más allá de 6 meses), no el spread real del ensamble "
+                "de modelos."
+            )
+
+            if not mejor_lag.get("significativo", False):
+                st.warning(
+                    "La relación histórica ONI ↔ precipitación de este municipio "
+                    "**no es significativa** tras la corrección por autocorrelación. "
+                    "La anomalía proyectada en el panel inferior debe tratarse con "
+                    "baja confiabilidad."
+                )

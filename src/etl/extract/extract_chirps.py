@@ -287,8 +287,8 @@ if __name__ == "__main__":
                 yaml.safe_dump(data, f)
             print(f"TEST STATUS: Updated {key} to {date} in {_test_status_file}")
         
-        start_date_override_example = datetime.date(2025, 1, 1)
-        end_date_example = datetime.date(2025, 2, 1) # Example end date
+        start_date_override_example = datetime.date(1990, 1, 1)
+        end_date_example = datetime.date(2000, 1, 1) # Example end date
         downloaded_chirps_files_test, latest_date_test = run_extract_chirps(config_example, start_date_override_example, end_date_example)
         if downloaded_chirps_files_test:
             print(f"\nSuccess: Downloaded/verified {len(downloaded_chirps_files_test)} files (forced start).")

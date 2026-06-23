@@ -41,15 +41,16 @@ def load_municipalities_gdf(config: Dict[str, Any],project_root: Optional[Path] 
     logger.info(f"Loading municipality reference from Parquet: {parquet_path}")
     gdf = gpd.read_parquet(parquet_path)
 
-    if "muni_code" not in gdf.columns:
+    if "id_mun" not in gdf.columns:
         raise ValueError(
-            f"'muni_code' column not found in municipality GeoJSON. "
+            f"'id_mun' column not found in municipality. "
             f"Available columns: {list(gdf.columns)}"
         )
     if gdf.geometry is None:
         raise ValueError("No geometry column found in municipality Parquet.")
     
-    gdf["muni_code"] = gdf["muni_code"].astype(str)
+    gdf["id_mun"] = gdf["id_mun"].astype(str)
+    gdf.rename(columns={"id_mun": "muni_code"}, inplace=True)
 
     return gdf
 def transform_chirps_to_municipal_table(

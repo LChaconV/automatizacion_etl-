@@ -61,7 +61,7 @@ def run_chirps_etl(
 
     project_root = Path(config["project_root"])
     source_key = "chirps"
-    today = datetime.date.today()
+    today = datetime.date(2004, 1, 1)
 
     # -------------------------------------------------------------------------
     # 0) Determine start date (incremental or forced)
@@ -505,7 +505,7 @@ def run_etl_pipeline(
     # CHIRPS
     chirps_summary = run_chirps_etl(config, force_chirps_start_date)
    
-    # -------------------------
+    """  # -------------------------
     # 2) NOAA Historical (ONI)
     # -------------------------
 
@@ -532,9 +532,10 @@ def run_etl_pipeline(
         "chirps": chirps_summary,
         "noaa_historical": noaa_hist_summary,
         "noaa_prediction": noaa_pred_summary,
-    }
+    }"""
 
     
 if __name__ == "__main__":
     logger.info("--- Script execution started from main block ---")
-    run_etl_pipeline()
+    start_data=datetime.date(1990, 1, 1)
+    run_etl_pipeline(start_data, None, None, None)

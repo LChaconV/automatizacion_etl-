@@ -7,3 +7,10 @@ data/processed/reference/dim_municipality.geojson
 *.geojson
 **/*.geojson
 *.zip
+*.png
+*.xls
+*.xlsx
+*.parquet
+*.pyc
+*.docx
+*.csv

@@ -15,7 +15,7 @@ from src.utils.status_manager import get_last_processed_date, update_last_proces
 # CHIRPS ETL functions
 from src.etl.extract.extract_chirps import extract_chirps_data_range,run_extract_chirps
 from src.etl.transform.transform_chirps import transform_chirps_to_municipal_table
-from src.etl.load.load_chirps import write_chirps_municipal_parquet
+from src.etl.load.load_chirps import write_chirps_municipal_parquet, write_chirps_quality_events_parquet
 
 
 # NOAA Historical
@@ -107,12 +107,14 @@ def run_chirps_etl(
     # 2) TRANSFORM (per tif -> municipal table rows)
     # -------------------------------------------------------------------------
     transformed_frames: List[pd.DataFrame] = []
+    all_quality_events: List[Dict[str, Any]] = []
     failures = 0
 
     for tif_path in downloaded_files:
         try:
             logger.info(f"CHIRPS | Transforming to municipal table: {tif_path.name}")
-            df_muni = transform_chirps_to_municipal_table(config, tif_path)
+            df_muni, quality_events = transform_chirps_to_municipal_table(config, tif_path)
+            all_quality_events.extend(quality_events)
 
             if df_muni is None or df_muni.empty:
                 logger.warning(f"CHIRPS | Transform produced empty DF for {tif_path.name}. Skipping.")
@@ -151,6 +153,10 @@ def run_chirps_etl(
             logger.warning("CHIRPS | Load wrote no files (empty output). Status will NOT be updated.")
         else:
             logger.info(f"CHIRPS | Load wrote {len(written_paths)} parquet file(s).")
+
+        if all_quality_events:
+            events_paths = write_chirps_quality_events_parquet(all_quality_events, config)
+            logger.info(f"CHIRPS | Quality events written: {len(events_paths)} parquet file(s).")
 
     except Exception as e:
         logger.error(f"CHIRPS | Load failed: {e}", exc_info=True)

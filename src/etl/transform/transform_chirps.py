@@ -56,7 +56,7 @@ def load_municipalities_gdf(config: Dict[str, Any],project_root: Optional[Path] 
 def transform_chirps_to_municipal_table(
     config: Dict[str, Any],
     tif_path: Path,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, List[Dict[str, Any]]]:
 
     date_obj = parse_chirps_date_from_name(tif_path)
     logger.info(f"CHIRPS transform for file: {tif_path.name} | date={date_obj}")
@@ -168,12 +168,14 @@ def transform_chirps_to_municipal_table(
                     precip_min = np.nan
                     precip_max = np.nan
                     std_dev = np.nan
+                    quality_flag = "NO_VALID_PIXELS"
                 else:
                     n_pixels = int(valid.size)
                     precip_mean = float(valid.mean())
                     precip_min = float(valid.min())
                     precip_max = float(valid.max())
                     std_dev = float(valid.std(ddof=0))
+                    quality_flag = "OK"
 
                 rows.append(
                     {
@@ -184,6 +186,7 @@ def transform_chirps_to_municipal_table(
                         "precip_min": precip_min,
                         "precip_max": precip_max,
                         "std_dev": std_dev,
+                        "quality_flag": quality_flag,
                     }
                 )
 
@@ -234,9 +237,7 @@ def transform_chirps_to_municipal_table(
 
    
 
-    for event in error_events:
-        print(event)
-    return df
+    return df, error_events
 
 
     
@@ -253,11 +254,12 @@ if __name__ == "__main__":
         app_config = load_config(config_file_path)
         municipalities_gdf = load_municipalities_gdf(app_config)
         tif=Path("C:/Users/laura/OneDrive/TESIS/ETL_LauraChacon/ETL_code/data/raw/chirps_raster_raw/chirps-v2.0.2025.01.tif")
-        municipalities_transform=transform_chirps_to_municipal_table(
+        municipalities_transform, transform_events = transform_chirps_to_municipal_table(
         app_config,
         tif)
         print("CHIRPS Transformation process completed successfully.")
         print(municipalities_transform.head())
+        print(f"Quality events: {len(transform_events)}")
         municipalities_transform_sorted = municipalities_transform.sort_values(
             by="n_pixels", ascending=True
         )

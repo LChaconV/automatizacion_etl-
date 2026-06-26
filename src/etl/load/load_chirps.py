@@ -72,6 +72,46 @@ def write_chirps_municipal_parquet(df: pd.DataFrame, config: Dict[str, Any]) -> 
 
     return written_paths
 
+
+def write_chirps_quality_events_parquet(
+    events: List[Dict[str, Any]], config: Dict[str, Any]
+) -> List[Path]:
+
+    if not events:
+        logger.info("CHIRPS quality events: nothing to save.")
+        return []
+
+    df = pd.DataFrame(events)
+    df["date"] = pd.to_datetime(df["date"])
+    df["year"] = df["date"].dt.year
+
+    project_root = Path(config["project_root"])
+    out_dir = project_root / config["processing"]["outputs"]["chirps_municipal_parquet_dir"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    written_paths: List[Path] = []
+    dedup_keys = ["tif_name", "muni_code", "event_type"]
+
+    for year, df_year in df.groupby("year"):
+        year_dir = out_dir / f"year={year}"
+        year_dir.mkdir(parents=True, exist_ok=True)
+        out_path = year_dir / f"chirps_quality_events_{year}.parquet"
+
+        if out_path.exists():
+            df_old = pd.read_parquet(out_path)
+            df_combined = pd.concat([df_old, df_year], ignore_index=True)
+            df_combined = df_combined.drop_duplicates(subset=dedup_keys, keep="last")
+        else:
+            df_combined = df_year.copy()
+
+        df_combined = df_combined.sort_values(["date", "muni_code"])
+        df_combined.to_parquet(out_path, index=False)
+        written_paths.append(out_path)
+        logger.info(f"CHIRPS quality events: written Parquet → {out_path}")
+
+    return written_paths
+
+
 if __name__ == "__main__":
     from pathlib import Path
     import pandas as pd
